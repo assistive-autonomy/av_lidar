@@ -1,6 +1,7 @@
-FROM ros:humble-ros-base-jammy AS base
+FROM ros:jazzy-ros-base-noble AS base
 
 ENV NEBULA_VERSION=0.2.15.3
+ENV ENABLE_AGNOCAST=0
 
 # Install basic dev tools (And clean apt cache afterwards)
 RUN apt-get update \
@@ -23,10 +24,15 @@ ENV RCUTILS_COLORIZED_OUTPUT=1
 
 COPY ./entrypoint.sh /
 
+# -----------------------------------------------------------------------
+
+FROM base AS prebuilt
+
 # Download and setup Nebula Driver
 WORKDIR $ROS_WS/src
-RUN wget --progress=dot:giga https://github.com/tier4/nebula/archive/refs/tags/v$NEBULA_VERSION.tar.gz \
-    && tar -xvzf v$NEBULA_VERSION.tar.gz
+RUN wget --progress=dot:giga https://github.com/tier4/nebula/archive/refs/tags/v"$NEBULA_VERSION".tar.gz \
+    && tar -xvzf v"$NEBULA_VERSION".tar.gz
+
 WORKDIR $ROS_WS/src/nebula-$NEBULA_VERSION
 RUN vcs import < build_depends.repos \
     && apt-get update \
@@ -34,39 +40,22 @@ RUN vcs import < build_depends.repos \
         rosdep install --from-paths . --ignore-src -y -r \
     && rm -rf /var/lib/apt/lists/*
 
+# Remove unnecessary nebula components
+RUN rm -rf agnocast \
+    && rm -rf nebula_examples \
+    && rm -rf nebula_tests
+
+# Import av_lidar_launch
+COPY ./av_lidar_launch "$ROS_WS"/src/av_lidar_launch
+
 # Source ROS setup for dependencies and build our code
 WORKDIR $ROS_WS
 RUN . /opt/ros/"$ROS_DISTRO"/setup.sh \
-    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+    && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # -----------------------------------------------------------------------
 
-FROM base AS prebuilt
-
-# Copy nebula artifacts/binaries from base to avoid re-compiling them
-RUN mkdir -p "$ROS_WS"/install
-COPY --from=base $ROS_WS/install "$ROS_WS"/install
-RUN mkdir -p "$ROS_WS"/build
-COPY --from=base "$ROS_WS"/build "$ROS_WS"/build
-
-# Import av_lidar_launch
-COPY ./ "$ROS_WS"/src/av_lidar_launch
-
-# Source ROS setup for dependencies and build our code
-RUN . /opt/ros/"$ROS_DISTRO"/setup.sh \
-    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-
-# -----------------------------------------------------------------------
-
-FROM base AS dev
-
-# Copy prebuild nebula ros driver from base
-RUN mkdir -p "$ROS_WS"/install
-COPY --from=base "$ROS_WS"/install "$ROS_WS"/install
-RUN mkdir -p "$ROS_WS"/build
-COPY --from=base "$ROS_WS"/build "$ROS_WS"/build
-RUN mkdir -p "$ROS_WS"/log
-COPY --from=base "$ROS_WS"/log "$ROS_WS"/log
+FROM prebuilt AS dev
 
 # Install basic dev tools (And clean apt cache afterwards)
 RUN apt-get update \
@@ -78,8 +67,6 @@ RUN apt-get update \
         inetutils-ping \
         # Bash auto-completion for convenience
         bash-completion \
-        # RVIZ
-        ros-"$ROS_DISTRO"-rviz2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Add sourcing local workspace command to bashrc for
@@ -96,12 +83,7 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 
 # -----------------------------------------------------------------------
 
-FROM base AS runtime
-
-# Copy artifacts/binaries from prebuilt
-COPY --from=prebuilt "$ROS_WS"/src "$ROS_WS"/src
-COPY --from=prebuilt "$ROS_WS"/install "$ROS_WS"/install
-COPY --from=prebuilt "$ROS_WS"/build "$ROS_WS"/build
+FROM prebuilt AS runtime
 
 # Add command to docker entrypoint to source newly compiled
 #   code when running docker container
