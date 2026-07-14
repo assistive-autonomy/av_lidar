@@ -2,6 +2,12 @@
 Changelog for package av_lidar_launch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Migrate package from ROS2 Humble to Jazzy (`#28 <https://github.com/ipab-rad/av_lidar/issues/28>`_)
+  - Cleanup Dockerfile for clarity and remove extras
+* Contributors: Alejandro Bordallo Micó
+
 2.0.0 (2026-03-11)
 ------------------
 
